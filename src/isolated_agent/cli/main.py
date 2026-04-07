@@ -33,6 +33,7 @@ def _register_builtins() -> None:
     from isolated_agent.agents.amp import AmpAgent
     from isolated_agent.agents.opencode import OpenCodeAgent
     from isolated_agent.backends.docker.backend import DockerBackend
+    from isolated_agent.backends.local.backend import LocalBackend
 
     agents = [
         ("codex", CodexAgent),
@@ -52,6 +53,11 @@ def _register_builtins() -> None:
 
     try:
         backend_registry.register("docker", DockerBackend)
+    except ValueError:
+        pass  # Already registered
+
+    try:
+        backend_registry.register("local", LocalBackend)
     except ValueError:
         pass  # Already registered
 
@@ -94,12 +100,14 @@ def run(task: str, agent: str, backend: str, workspace: str, verbose: bool) -> N
         sys.exit(1)
 
     # Create agent instance and validate configuration (API keys, etc.)
+    # Skip validation for local backend — agent uses its native auth.
     agent_instance = agent_cls()
-    try:
-        agent_instance.validate()
-    except ValueError as exc:
-        console.print(f"[red]Configuration error:[/red] {exc}")
-        sys.exit(1)
+    if backend != "local":
+        try:
+            agent_instance.validate()
+        except ValueError as exc:
+            console.print(f"[red]Configuration error:[/red] {exc}")
+            sys.exit(1)
 
     # Create backend instance (may fail if Docker is not available)
     try:
@@ -190,6 +198,7 @@ def list_backends() -> None:
 
     descriptions = {
         "docker": "Docker Compose based isolation (two containers + SSH bridge)",
+        "local": "Local agent + Docker task container (uses host auth, forwards tools via docker exec)",
     }
 
     for name in backend_registry.list():
