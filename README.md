@@ -1,8 +1,12 @@
 # isolated-agent
 
-Run any AI coding agent in a sandboxed Docker environment. The agent never knows it's isolated — all execution is transparently forwarded to a separate task container via SSH.
+Run any AI coding agent in a sandboxed Docker environment. The agent never knows it's isolated — all execution is transparently forwarded to a separate task container.
 
 Supports **8 agents** out of the box: Claude Code, Codex, Aider, Goose, Cline, Gemini CLI, Amp, OpenCode.
+
+Two backends:
+- **`docker`** (default) — both agent and tools run in Docker containers, connected via SSH
+- **`local`** — agent runs on your host (using native auth like macOS Keychain), tools forwarded to Docker via `docker exec`
 
 ## Install
 
@@ -27,6 +31,9 @@ isolated-agent run --agent aider "refactor the database layer"
 # Any of: claude, codex, aider, goose, cline, gemini, amp, opencode
 isolated-agent run --agent <name> "<task>"
 
+# Use local backend — runs your host's agent CLI (no API key needed)
+isolated-agent run --agent claude --backend local "fix the auth bug"
+
 # List available agents and backends
 isolated-agent agents
 isolated-agent backends
@@ -37,6 +44,7 @@ isolated-agent backends
 ```python
 from isolated_agent import Session, DockerBackend, ClaudeCodeAgent
 
+# Docker backend — agent + tools both in containers (needs API key)
 session = Session(
     agent=ClaudeCodeAgent(),
     backend=DockerBackend(),
@@ -46,7 +54,21 @@ result = session.run(task="fix the auth bug")
 print(f"Exit code: {result.exit_code}, Duration: {result.duration_seconds}s")
 ```
 
+```python
+from isolated_agent import Session, LocalBackend, ClaudeCodeAgent
+
+# Local backend — agent runs on host (uses native auth), tools in container
+session = Session(
+    agent=ClaudeCodeAgent(),
+    backend=LocalBackend(),
+    workspace="./my-project",
+)
+result = session.run(task="fix the auth bug")
+```
+
 ## How It Works
+
+### Docker Backend (default)
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -61,16 +83,38 @@ print(f"Exit code: {result.exit_code}, Duration: {result.duration_seconds}s")
 └─────────────────────────────────────────────────┘
 ```
 
-1. The CLI creates a **Session** with your chosen agent and the Docker backend
-2. Docker backend renders templates, generates SSH keys, builds two containers
-3. **Agent container** (Alpine) runs the agent CLI with two isolation layers:
-   - **Symlinks** — common tools (`python3`, `git`, `npm`, etc.) are symlinked to a forwarding script
-   - **LD_PRELOAD** — a C library hooks `execve` to catch any direct syscalls that bypass symlinks
-4. **Task container** (Debian) runs sshd with Python, Node, Git, and all dev tools
-5. Every command the agent runs is transparently forwarded to the task container via SSH
-6. `/workspace` is the only shared volume — the agent reads and writes files there
+1. Docker backend renders templates, generates SSH keys, builds two containers
+2. **Agent container** (Alpine) runs the agent CLI with two isolation layers:
+   - **Symlinks** — common tools are symlinked to a forwarding script
+   - **LD_PRELOAD** — a C library hooks `execve` to catch direct syscalls that bypass symlinks
+3. **Task container** (Debian) runs sshd with Python, Node, Git, and all dev tools
+4. Every command the agent runs is transparently forwarded to the task container via SSH
+5. `/workspace` is the only shared volume
 
 The agent container has **no Docker socket**, **no Docker CLI**, and no way to escape the sandbox.
+
+### Local Backend
+
+```
+┌──────────────┐                   ┌────────────────┐
+│  Your Host   │                   │  Docker         │
+│              │  docker exec      │                 │
+│  Agent CLI   │ ───────────────>  │  Task container │
+│  (native)    │ <── exit codes ── │  (Debian)       │
+│              │                   │                 │
+│  PATH shims  │                   │  python3, git,  │
+│  python3 ──> │                   │  npm, curl ...  │
+│  git ──────> │                   │                 │
+└──────────────┘                   └────────────────┘
+       │                                  │
+       └────────── /workspace ────────────┘
+```
+
+1. Starts only a **task container** with dev tools
+2. Creates **PATH shims** on the host — lightweight scripts that forward tool calls via `docker exec`
+3. Runs the agent CLI **locally** with the shimmed PATH
+4. Agent uses its native auth (macOS Keychain, config files) — no API key env var needed
+5. Tool execution is isolated in the container; the agent itself runs natively
 
 ## Supported Agents
 
@@ -151,4 +195,4 @@ result = session.run("do something")
 
 - Python 3.11+
 - Docker with Compose v2+
-- API key for your chosen agent (set as env var)
+- API key for your chosen agent (set as env var) — not needed with `--backend local`

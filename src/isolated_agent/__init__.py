@@ -21,6 +21,7 @@ from isolated_agent.agents.gemini import GeminiAgent
 from isolated_agent.agents.amp import AmpAgent
 from isolated_agent.agents.opencode import OpenCodeAgent
 from isolated_agent.backends.docker.backend import DockerBackend
+from isolated_agent.backends.local.backend import LocalBackend
 
 __version__ = "0.1.0"
 
@@ -38,6 +39,7 @@ __all__ = [
     "AmpAgent",
     "OpenCodeAgent",
     "DockerBackend",
+    "LocalBackend",
     "AgentConfig",
     "BackendConfig",
     "ExecutionResult",
